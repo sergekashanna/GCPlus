@@ -4,7 +4,7 @@ c=10; c1=8; c2=2;
 l=7;
 len_last=mod(k-1,l)+1;
 K=ceil(k/l);
-t=3;
+t=5;
 
 %Decoder setting
 lim=5;
