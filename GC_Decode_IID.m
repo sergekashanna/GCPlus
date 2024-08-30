@@ -1,17 +1,18 @@
-function [uhat, Uhat] = GC_Decode_IID(y,n,k,l,N,K,c,c1,c2,q,secondary,len_last,lim,P1,P2,t)
+function [uhat, Uhat] = GC_Decode_IID(y,n,k,l,N,K,c1,c2,q,secondary,len_last,lim,P1,P2,t)
     
     %Initilaizations
     uhat=[];
     d=numel(y)-n;
+    flag = mod(c1+c2,2)~=0;
     
     %RS encoder setup
-    rsEncoder = comm.RSEncoder(N,K,'BitInput',false);
+    rsEncoder = comm.RSEncoder(N+flag,K,'BitInput',false);
     primPolyDegree = l;
     rsEncoder.PrimitivePolynomialSource = 'Property';
     rsEncoder.PrimitivePolynomial = de2bi(primpoly(primPolyDegree,'nodisplay'),'left-msb');
 
     %RS decoder setup
-    rsDecoder=comm.RSDecoder(N,K,'BitInput',false);
+    rsDecoder=comm.RSDecoder(N+flag,K,'BitInput',false);
     rsDecoder.ErasuresInputPort=true;
     rsDecoder.NumCorrectedErrorsOutputPort=true;
     rsDecoder.PrimitivePolynomialSource = 'Property';
@@ -22,6 +23,9 @@ function [uhat, Uhat] = GC_Decode_IID(y,n,k,l,N,K,c,c1,c2,q,secondary,len_last,l
     p=rep_decode_gamma(seg,t,c2*l);
     A=reshape(p,l,c2);
     Par=bi2de(fliplr(A'));
+    if(flag)
+        Par=[Par;0];
+    end
     
     %Fast check
     if(d==0)
@@ -30,7 +34,7 @@ function [uhat, Uhat] = GC_Decode_IID(y,n,k,l,N,K,c,c1,c2,q,secondary,len_last,l
         lengths(K)=len_last;
         Y=divide_vector(yE,lengths);
         Y=[Y';Par];
-        erasure_pattern=[zeros(1,N-c+c1),ones(1,c-c1)];
+        erasure_pattern=[zeros(1,N-c2),ones(1,c2+flag)];
         [Uhat, errs]=step(rsDecoder,Y,erasure_pattern');
         Xhat=rsEncoder(Uhat);
         if(isequal(Xhat(K+c1+1:K+c1+c2),Par(1:c2)) && errs~=-1)
@@ -65,7 +69,7 @@ function [uhat, Uhat] = GC_Decode_IID(y,n,k,l,N,K,c,c1,c2,q,secondary,len_last,l
             end
             Y=divide_vector(yE,lengths);
             Y=[Y';Par];
-            erasure_pattern=[zeros(1,N-c+c1),ones(1,c-c1)];
+            erasure_pattern=[zeros(1,N-c2),ones(1,c2+flag)];
             erasure_pattern(erasures)=1;
             Y(Y>q-1)=0;
             [Uhat,errs]=step(rsDecoder,Y,erasure_pattern');
@@ -95,7 +99,7 @@ function [uhat, Uhat] = GC_Decode_IID(y,n,k,l,N,K,c,c1,c2,q,secondary,len_last,l
                 lengths=lengths+P(i,:);
                 Y=divide_vector(yE,lengths);
                 Y=[Y';Par];
-                erasure_pattern=[zeros(1,N-c+c1),ones(1,c-c1)];
+                erasure_pattern=[zeros(1,N-c2),ones(1,c2+flag)];
                 erasure_pattern(P(i,:)~=0)=1;
                 Y(Y>q-1)=0;
                 [Uhat,errs]=step(rsDecoder,Y,erasure_pattern');

@@ -1,5 +1,9 @@
 function uhat = GC_Decode_loc(y,n,k,l,N,K,c,c1,c2,q,len_last,P1,w,W)
     
+    if nargin < 14
+        W = 3*(w+1);
+    end
+    
     %Initilaizations
     uhat=[];
     d=numel(y)-n;

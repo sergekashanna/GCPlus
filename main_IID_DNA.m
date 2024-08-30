@@ -7,13 +7,13 @@ K=ceil(k/l);
 t=5;
 
 %Simulation setup
-total_iter=1e5;
+total_iter=1e3;
 Pe=0.001:0.001:0.01;
 Pd=Pe/3; Pi=Pe/3; Ps=Pe/3;
 
 %Inner decoder parameters
 lim=5;
-depth=zeros(1,lim); depth(1)=1; depth(2)=1; depth(3)=1;
+depth=zeros(1,lim); depth(1)=1; depth(2)=1; %depth(3)=1;
 secondary=1;
 
 % Pre-computing
@@ -23,13 +23,17 @@ disp("Done precomputing patterns");
 
 %Initalizations
 failure=zeros(1,length(Pe));
-errors=zeros(1,length(Pe));
+error=zeros(1,length(Pe));
+total_errors=zeros(1,length(Pe));
 
 %Main
 for j=1:length(Pe)
+
     %Initalize counters
     countS=0; %succesful decoding
     countF=0; %decoding failure uhat empty
+    countE=0; %decoding error uhat ~= u
+
     parfor iter=1:total_iter
         u=randi([0,1],1,k);
         [x,n,N,K,q] = GC_Encode_IID(u,l,c1,c2,t);
@@ -39,9 +43,14 @@ for j=1:length(Pe)
             countS=countS+1;
         elseif(isempty(uhat))
             countF=countF+1;
+        else
+            countE=countE+1;
         end
     end
     failure(j)=countF/total_iter;
-    errors(j)=1-(countS/total_iter);
-    disp(['Edit Error Probability: ' num2str(Pe(j))  ', Decoding failure rate: ' num2str(failure(j)) ', Total decoding error rate: ' num2str(errors(j))]);
+    error(j)=countE/total_iter;
+    total_errors(j)=1-(countS/total_iter);
+    disp(['Edit Prob: ' num2str(Pe(j))  ', Failure rate: ' num2str(failure(j)) ', Error rate: ' num2str(error(j)) ', Total: ' num2str(total_errors(j))]);
 end
+figure(1)
+semilogy(Pe,total_errors)

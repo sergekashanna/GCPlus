@@ -1,4 +1,5 @@
 function [x,n,N,K,q,U,X] = GC_Encode_IID(u,l,c1,c2,t)
+    %Add markers
     k=numel(u);
     K=ceil(k/l);
     N=K+c1+c2;
