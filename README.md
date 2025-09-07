@@ -17,7 +17,7 @@ The source accompanies the paper:
 - **Theoretical analysis**  
   Evaluation of decoding error probabilities using analytical expressions.
 - **Simulation scripts**  
-  Reproduce the figures in the paper for frame error rate (FER) vs. edit probability and localized errors.
+  Reproduce the results in the paper for frame error rate (FER) vs. edit probability and localized errors.
 
 ---
 
@@ -86,7 +86,7 @@ If you use this code in your research, please cite:
 @article{kas2025gcplus,
   author    = {Serge Kas Hanna},
   title     = {GC+ Code: A Systematic Short Blocklength Code for Correcting Random Edit Errors in DNA Storage},
-  journal   = {IEEE Transactions on Information Theory},
+  journal   = {arXiv preprint arXiv:2402.01244},
   year      = {2025},
 }
 ```
