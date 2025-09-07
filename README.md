@@ -1,6 +1,6 @@
 # Guess & Check Plus (GC+) Codes
 
-This repository contains Python implementations and experiments for **Guess & Check Plus (GC+) codes**, a family of systematic short blocklength codes designed to correct random **edit errors** (deletions, insertions, and substitutions). GC+ codes are motivated by the requirements of **DNA data storage**, where short sequences (oligos) must be robust to noise introduced during synthesis, storage, and sequencing.
+This repository contains Python implementations and experiments for **Guess & Check Plus (GC+) codes**, a family of systematic short blocklength codes designed to correct random **edit errors** (deletions, insertions, and substitutions). GC+ codes are motivated by the requirements of **DNA data storage**, where short DNA sequences (oligos) must be robust to noise introduced during synthesis, storage, and sequencing.
 
 The source accompanies the paper:
 
