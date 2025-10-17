@@ -5,7 +5,7 @@ This repository contains Python implementations and experiments for **Guess & Ch
 The source accompanies the paper:
 
 > Serge Kas Hanna, *GC+ Code: A Systematic Short Blocklength Code for Correcting Random Edit Errors in DNA Storage*, under review.  
-> [arXiv preprint](https://arxiv.org/abs/2401.12345)
+> [arXiv preprint](https://arxiv.org/abs/2402.01244)
 
 ---
 
