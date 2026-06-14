@@ -36,7 +36,7 @@ lambda_depths[1] = 1
 lambda_depths[2] = 0
 
 # Channel & sweeps (fixed)
-total_iter = 5000                          # total trials per Pe (per scenario)
+total_iter = 5000                        # total trials per Pe (per scenario)
 Pe_values = np.arange(0.001, 0.010, 0.001)  # grid of Pe
 
 # Per-task iterations
@@ -172,7 +172,7 @@ def run_case(MODE, param2, split, Patterns, codebook_binary):
     results_dict = {float(pe): {'S':0, 'F':0, 'E':0, 'P':0, 'time':0.0} for pe in Pe_values}
 
     # ----- Pool per-scenario -----
-    NPROCS = cpu_count()
+    NPROCS = 61
     tqdm.set_lock(RLock())
     desc = (
         f"Simulating [{CASE_TAG}, "
