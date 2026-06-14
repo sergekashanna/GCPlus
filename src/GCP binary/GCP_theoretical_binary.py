@@ -38,7 +38,7 @@ def _pmf_T_marginal(l: int, N: int, Pi: float, Pd: float) -> np.ndarray:
     return pmfT  # support [-lN..+lN], index T + l*N
 
 
-def _prob_failure_event2(l: int, N: int, lambda_depths, Pi: float, Pd: float) -> float:
+def _prob_failure_event2(l: int, N: int, lambda_depths, Pi: float, Pd: float, n_tilde: int) -> float:
     """
     Event-2 (silent-pairs) failure probability using a compact 'lambda_depths' list:
       - lambda_depths[m] is the threshold depth for |Δ| = m, for m=0..lim-1
@@ -62,28 +62,28 @@ def _prob_failure_event2(l: int, N: int, lambda_depths, Pi: float, Pd: float) ->
     probs = _pmf_of_single_block(l, Pi, Pd)  # length 2l+1, support [-l..l]
 
     # Decompose as in your MATLAB port
-    probs_neg = np.flip(probs[:l+1])     # |d| = 0..l for d<=0  (degrees 0..l)
-    probs_pos = probs[l:]                # d = 0..l             (degrees 0..l)
+    probs_neg = np.flip(probs[:l + 1])  # |d| = 0..l for d<=0  (degrees 0..l)
+    probs_pos = probs[l:]  # d = 0..l             (degrees 0..l)
 
     # Build polynomial bases aligned by degree = step size
     # For 1..l: put a zero at degree 0 so base[j] aligns with degree j
-    p_neg_nozero = probs_neg[1:]                       # length l  (steps 1..l)
-    p_pos_nozero = probs_pos[1:]                       # length l
+    p_neg_nozero = probs_neg[1:]  # length l  (steps 1..l)
+    p_pos_nozero = probs_pos[1:]  # length l
     base_neg_nozero = np.concatenate(([0.0], p_neg_nozero))  # degrees 0..l (deg0=0)
     base_pos_nozero = np.concatenate(([0.0], p_pos_nozero))
-    base_neg_with0  = probs_neg.copy()                 # degrees 0..l
-    base_pos_with0  = probs_pos.copy()
+    base_neg_with0 = probs_neg.copy()  # degrees 0..l
+    base_pos_with0 = probs_pos.copy()
 
     # Precompute polynomial power tables
     #  - nozero bases up to exponent m (we only ever need degree m <= m_max)
     #  - with0 bases up to exponent i2 in 0..N (degree up to l*i2)
     dists_neg_nozero = _poly_powers_all(base_neg_nozero, m_max)  # list of arrays
     dists_pos_nozero = _poly_powers_all(base_pos_nozero, m_max)
-    dists_neg_with0  = _poly_powers_all(base_neg_with0,  N)
-    dists_pos_with0  = _poly_powers_all(base_pos_with0,  N)
+    dists_neg_with0 = _poly_powers_all(base_neg_with0, N)
+    dists_pos_with0 = _poly_powers_all(base_pos_with0, N)
 
     # jointPMF[m, idx] where idx = Δ + offsetT, m=0..m_max
-    jointPMF = np.zeros((m_max + 1, 2*l*N + 1), dtype=float)
+    jointPMF = np.zeros((m_max + 1, 2 * l * N + 1), dtype=float)
     offsetT = l * N
 
     # Fill jointPMF only up to m_max (we don't need larger m for inside-window cuts)
@@ -98,7 +98,7 @@ def _prob_failure_event2(l: int, N: int, lambda_depths, Pi: float, Pd: float) ->
             p1_pos[i1] = dist_pos[m] if m <= (l * i1) else 0.0
 
         # Loop Δ in [-lN..+lN]
-        for Delta in range(-l*N, l*N + 1):
+        for Delta in range(-l * N, l * N + 1):
             s = 0.0
             for i1 in range(0, m + 1):
                 i2 = N - i1
@@ -115,14 +115,39 @@ def _prob_failure_event2(l: int, N: int, lambda_depths, Pi: float, Pd: float) ->
                         s += wC * p1_pos[i1] * p2
             jointPMF[m, Delta + offsetT] = s
 
-    # ---------- Final probability with "ignore outside window" ----------
-    # Success mass = all mass for |Δ| <= lim with m ≤ lambda_depths[|Δ|]
-    success = 0.0
+    # ---------- Final probability (Lemma 3: boundary-mismatch term) ----------
+    # success = sum_{d,j,z} q_j^(n_tilde) * Pr(Z=z, Dtilde=d), where
+    #   d   = realization of Dtilde (offset over the N' message+guess segments),
+    #   j   = realization of Q^(n_tilde) (offset over the encoded check parities),
+    #   z   <= z_max(d,j) with z_max keyed on the global offset Delta = d + j,
+    #   z_max(d,j) = min{ l*N, floor((|d+j| + 2*lambda(d+j) - |d| - |j|)/2) }.
+    # Only global offsets inside the decoding window (|d+j| <= lim-1) succeed;
+    # the rest are treated as failures ("ignore outside window").
+    #
+    # q_off[j + n_tilde] = Pr(Q^(n_tilde) = j)  (Proposition 1, via _pmf_delta)
+    q_off = np.array([_pmf_delta(j, n_tilde, Pi, Pd)
+                      for j in range(-n_tilde, n_tilde + 1)], dtype=float)
 
-    for Delta in range(-(lim - 1), (lim - 1) + 1):
-        lam = int(lambda_depths[abs(Delta)])
-        idx = Delta + offsetT
-        success += jointPMF[:lam + 1, idx].sum()
+    success = 0.0
+    for d in range(-l * N, l * N + 1):
+        idx = d + offsetT
+        col = jointPMF[:, idx]
+        if col.sum() <= 0.0:
+            continue
+        for j in range(-n_tilde, n_tilde + 1):
+            qj = q_off[j + n_tilde]
+            if qj <= 0.0:
+                continue
+            glob = d + j  # global offset Delta = Dtilde + Q^(n_tilde)
+            if abs(glob) > lim - 1:  # outside decoding window -> failure
+                continue
+            lam = int(lambda_depths[abs(glob)])
+            zmax = (abs(glob) + 2 * lam - abs(d) - abs(j)) // 2
+            zmax = min(l * N, zmax)
+            if zmax < 0:
+                continue
+            zmax = min(zmax, m_max)  # jointPMF only stores rows 0..m_max
+            success += qj * col[:zmax + 1].sum()
 
     Pr_fail = 1.0 - float(success)
     # numerical safety
@@ -156,12 +181,12 @@ def _pmf_of_single_block(l: int, p_minus: float, p_plus: float) -> np.ndarray:
 #     maxNeg = l * N
 #     maxPos = l * N
 #     offsetT = maxT
-    
+
 #     pmfD = _pmf_of_single_block(l, p, q)
-    
+
 #     state = defaultdict(float)
 #     state[(offsetT, 0, 0)] = 1.0
-    
+
 #     for n in range(N):
 #         new_state = defaultdict(float)
 #         for (tIdx, negIdx, posIdx), prob in state.items():
@@ -196,35 +221,66 @@ def _pmf_of_single_block(l: int, p_minus: float, p_plus: float) -> np.ndarray:
 #         else:
 #             if negIdx == posIdx and negIdx > lambdaT:
 #                 P += prob
-                
+
 #     return P
 
 
+def _pmf_Etilde(e: int, N: int, alpha0: float, alpha1: float, alpha2: float) -> float:
+    """
+    PMF of Etilde = sum_{i=1}^{N} E_i (Lemma 2, new paper):
+      Pr(Etilde = e) = sum_{j=max(0,e-N)}^{floor(e/2)}
+                          multinomial(N; e-2j, j, N-e+j)
+                          * alpha1^(e-2j) * alpha2^j * alpha0^(N-e+j),
+    a single sum over j (the count of substitution-only segments), since
+    fixing e and j determines the offset count j1 = e-2j and the error-free
+    count j0 = N-e+j.
+    """
+    s = 0.0
+    j_lo = max(0, e - N)
+    for j in range(j_lo, e // 2 + 1):
+        j1 = e - 2 * j  # # segments with non-zero offset (E_i = 1)
+        j0 = N - e + j  # # error-free segments        (E_i = 0)
+        if j1 < 0 or j0 < 0:
+            continue
+        s += (factorial(N) / (factorial(j1) * factorial(j) * factorial(j0))) \
+             * (alpha1 ** j1) * (alpha2 ** j) * (alpha0 ** j0)
+    return s
 
 
-
-def _prob_failure_event1(Pd: float, Pi: float, Ps: float, l: int, c1: int, N: int) -> float:
+def _prob_failure_event1(Pd: float, Pi: float, Ps: float, l: int, c1: int, N: int, n_tilde: int) -> float:
     """
     Python version of prob_failure_event1.
+
+    Implements Lemma 2 (new paper):
+      Pr(E1) = 1 - Pr(Etilde <= c1-1) - q0^(n_tilde) * Pr(Etilde = c1),
+    where the extra term accounts for the boundary-mismatch indicator
+    1{Dtilde != Delta}. Here q0^(n_tilde) = Pr(Q^(n_tilde) = 0) is the
+    probability of zero net offset over the n_tilde encoded check-parity
+    symbols (Proposition 1), and n_tilde is the encoded check-parity length.
     """
-    # p0: all-zero in a block of length l (no edit)
-    p0 = (1.0 - (Pd + Pi + Ps)) ** l
+    # alpha0: error-free segment of length l (no edit)
+    alpha0 = (1.0 - (Pd + Pi + Ps)) ** l
 
-    # p1: complementary of the 'balanced' deletion/insertion no-substitution cases up to floor(l/2)
-    p1 = 0.0
+    # alpha1 = Pr(N_del != N_ins) = 1 - Pr(N_del == N_ins) over a segment of length l
+    bal = 0.0
     for i in range(0, (l // 2) + 1):
-        p1 += factorial(l) / (factorial(i) * factorial(i) * factorial(l - 2 * i)) * (Pd ** i) * (Pi ** i) * ((1 - Pd - Pi) ** (l - 2 * i))
-    p1 = 1.0 - p1
+        bal += factorial(l) / (factorial(i) * factorial(i) * factorial(l - 2 * i)) * (Pd ** i) * (Pi ** i) * (
+                    (1 - Pd - Pi) ** (l - 2 * i))
+    alpha1 = 1.0 - bal
 
-    # p2: the rest
-    p2 = 1.0 - p0 - p1
+    # alpha2: the rest (errors with zero offset)
+    alpha2 = 1.0 - alpha0 - alpha1
 
-    # sum over i,j then complement
-    acc = 0.0
-    for i in range(0, c1 + 1):
-        for j in range(0, (c1 - i) // 2 + 1):
-            acc += comb(N, i) * comb(N - i, j) * (p1 ** i) * (p2 ** j) * (p0 ** (N - i - j))
-    return float(1.0 - acc)
+    # q0 = Pr(Q^(n_tilde) = 0): zero net offset in the encoded check parities
+    q0 = _pmf_delta(0, n_tilde, Pi, Pd)
+
+    # Pr(Etilde <= c1-1) via the single-sum PMF, plus the gated boundary term
+    cdf = 0.0
+    for e in range(0, c1):  # e = 0 .. c1-1
+        cdf += _pmf_Etilde(e, N, alpha0, alpha1, alpha2)
+    pmf_c1 = _pmf_Etilde(c1, N, alpha0, alpha1, alpha2)
+
+    return float(1.0 - cdf - q0 * pmf_c1)
 
 
 # ----------------------------
@@ -299,7 +355,7 @@ def _compute_cdf_sj(n: int, t: int, j: int, k: int, Pd: float, Ps: float, Pi: fl
                     continue
 
                 bitIndex = processedBits + i
-                inBlockJ   = ((j - 1) * t <= bitIndex <= j * t - 1)
+                inBlockJ = ((j - 1) * t <= bitIndex <= j * t - 1)
                 inBlockJm1 = ((j - 2) * t <= bitIndex <= (j - 1) * t - 1)
                 inBlockJp1 = (j * t <= bitIndex <= (j + 1) * t - 1)
 
@@ -316,14 +372,14 @@ def _compute_cdf_sj(n: int, t: int, j: int, k: int, Pd: float, Ps: float, Pi: fl
                         add(i + 1, offIdx, s, probState * Ps)
                     elif inBlockJm1:
                         add(i + 1, offIdx, s + 1, probState * Ps * (1.0 - a))
-                        add(i + 1, offIdx, s,     probState * Ps * a)
+                        add(i + 1, offIdx, s, probState * Ps * a)
                     elif inBlockJp1:
                         add(i + 1, offIdx, s + 1, probState * Ps * (1.0 - b))
-                        add(i + 1, offIdx, s,     probState * Ps * b)
+                        add(i + 1, offIdx, s, probState * Ps * b)
                     else:
-                        add(i + 1, offIdx, s,     probState * Ps)
+                        add(i + 1, offIdx, s, probState * Ps)
                 else:
-                    add(i + 1, offIdx, s,         probState * Ps)
+                    add(i + 1, offIdx, s, probState * Ps)
 
                 # 3) No error: offset unchanged
                 if (j - 1) * t <= effPos <= j * t - 1:
@@ -331,14 +387,14 @@ def _compute_cdf_sj(n: int, t: int, j: int, k: int, Pd: float, Ps: float, Pi: fl
                         add(i + 1, offIdx, s + 1, probState * pNo)
                     elif inBlockJm1:
                         add(i + 1, offIdx, s + 1, probState * pNo * a)
-                        add(i + 1, offIdx, s,     probState * pNo * (1.0 - a))
+                        add(i + 1, offIdx, s, probState * pNo * (1.0 - a))
                     elif inBlockJp1:
                         add(i + 1, offIdx, s + 1, probState * pNo * b)
-                        add(i + 1, offIdx, s,     probState * pNo * (1.0 - b))
+                        add(i + 1, offIdx, s, probState * pNo * (1.0 - b))
                     else:
-                        add(i + 1, offIdx, s,     probState * pNo)
+                        add(i + 1, offIdx, s, probState * pNo)
                 else:
-                    add(i + 1, offIdx, s,         probState * pNo)
+                    add(i + 1, offIdx, s, probState * pNo)
 
                 # 4) Insertion: offset -> offset + 1
                 newOff = offset + 1
@@ -350,35 +406,34 @@ def _compute_cdf_sj(n: int, t: int, j: int, k: int, Pd: float, Ps: float, Pi: fl
                     elif inBlockJm1:
                         add(i + 1, newOffIdx, s + 1, probState * Pi * 0.5)
                         add(i + 1, newOffIdx, s + 2, probState * Pi * 0.5 * a)
-                        add(i + 1, newOffIdx, s,     probState * Pi * 0.5 * (1.0 - a))
+                        add(i + 1, newOffIdx, s, probState * Pi * 0.5 * (1.0 - a))
                     elif inBlockJp1:
                         add(i + 1, newOffIdx, s + 1, probState * Pi * 0.5)
                         add(i + 1, newOffIdx, s + 2, probState * Pi * 0.5 * b)
-                        add(i + 1, newOffIdx, s,     probState * Pi * 0.5 * (1.0 - b))
+                        add(i + 1, newOffIdx, s, probState * Pi * 0.5 * (1.0 - b))
                     else:
-                        add(i + 1, newOffIdx, s,     probState * Pi)
+                        add(i + 1, newOffIdx, s, probState * Pi)
                 elif effPos == j * t:
-                    add(i + 1, newOffIdx, s,     probState * Pi * 0.5)
+                    add(i + 1, newOffIdx, s, probState * Pi * 0.5)
                     add(i + 1, newOffIdx, s + 1, probState * Pi * 0.5)
                 elif effPos == (j - 1) * t:
                     if inBlockJ:
                         add(i + 1, newOffIdx, s + 1, probState * Pi)
                     elif inBlockJm1:
                         add(i + 1, newOffIdx, s + 1, probState * Pi * a)
-                        add(i + 1, newOffIdx, s,     probState * Pi * (1.0 - a))
+                        add(i + 1, newOffIdx, s, probState * Pi * (1.0 - a))
                     elif inBlockJp1:
                         add(i + 1, newOffIdx, s + 1, probState * Pi * b)
-                        add(i + 1, newOffIdx, s,     probState * Pi * (1.0 - b))
+                        add(i + 1, newOffIdx, s, probState * Pi * (1.0 - b))
                     else:
-                        add(i + 1, newOffIdx, s,     probState * Pi)
+                        add(i + 1, newOffIdx, s, probState * Pi)
                 else:
-                    add(i + 1, newOffIdx, s,         probState * Pi)
+                    add(i + 1, newOffIdx, s, probState * Pi)
 
     # PMF over s at i = 3*t (sum across offsets)
     pmfS = DP[3 * t].sum(axis=0)[: t + 1]
     cdfS = np.cumsum(pmfS)
     return cdfS, pmfS
-
 
 
 def _prob_error_rep(k: int, t: int, Pd: float, Pi: float, Ps: float):
@@ -416,20 +471,23 @@ def _prob_error_rep(k: int, t: int, Pd: float, Pi: float, Ps: float):
 # ---------------------------------------
 
 def theoretical_error_rep(
-    Pe: np.ndarray,
-    *,
-    k: int,
-    l: int,
-    c1: int,
-    c2: int,
-    N: int,
-    t_rep: int,
-    lambda_depths: np.ndarray,
-    split=tuple,
+        Pe: np.ndarray,
+        *,
+        k: int,
+        l: int,
+        c1: int,
+        c2: int,
+        N: int,
+        t_rep: int,
+        lambda_depths: np.ndarray,
+        split=tuple,
 ):
-    
     Pe = np.asarray(Pe, dtype=float)
     Pd_frac, Pi_frac, Ps_frac = split
+
+    # Encoded check-parity length (in working-domain symbols): c2*l check-parity
+    # symbols, each repeated t_rep times.
+    n_tilde = t_rep * c2 * l
 
     event1 = np.zeros_like(Pe)
     event2 = np.zeros_like(Pe)
@@ -440,8 +498,8 @@ def theoretical_error_rep(
         Pi = Pi_frac * pe
         Ps = Ps_frac * pe
 
-        event1[i] = _prob_failure_event1(Pd, Pi, Ps, l, c1, N)
-        event2[i] = _prob_failure_event2(l, N, lambda_depths, Pd, Pi)
+        event1[i] = _prob_failure_event1(Pd, Pi, Ps, l, c1, N, n_tilde)
+        event2[i] = _prob_failure_event2(l, N, lambda_depths, Pd, Pi, n_tilde)
         parity[i] = _prob_error_rep(k, t_rep, Pd, Pi, Ps)
 
     total = event1 + event2 + parity
@@ -449,20 +507,23 @@ def theoretical_error_rep(
 
 
 def theoretical_error_brute(
-    Pe: np.ndarray,
-    *,
-    l: int,
-    c1: int,
-    c2: int,
-    N: int,
-    d_min: int,
-    n_check: int,
-    lambda_depths: np.ndarray,
-    split=tuple,
+        Pe: np.ndarray,
+        *,
+        l: int,
+        c1: int,
+        c2: int,
+        N: int,
+        d_min: int,
+        n_check: int,
+        lambda_depths: np.ndarray,
+        split=tuple,
 ):
-
     Pe = np.asarray(Pe, dtype=float)
     Pd_frac, Pi_frac, Ps_frac = split
+
+    # Encoded check-parity length (in working-domain symbols) equals the
+    # codeword length of the SLD-based check-parity code.
+    n_tilde = n_check
 
     event1 = np.zeros_like(Pe)
     event2 = np.zeros_like(Pe)
@@ -475,10 +536,11 @@ def theoretical_error_brute(
         Pi = Pi_frac * pe
         Ps = Ps_frac * pe
 
-        event1[i] = _prob_failure_event1(Pd, Pi, Ps, l, c1, N)
-        event2[i] = _prob_failure_event2(l, N, lambda_depths, Pd, Pi) #_prob_silent_pairs_exceed_lambda(l, Pd, Pi, N, lambda_array) 
+        event1[i] = _prob_failure_event1(Pd, Pi, Ps, l, c1, N, n_tilde)
+        event2[i] = _prob_failure_event2(l, N, lambda_depths, Pd, Pi,
+                                         n_tilde)  # _prob_silent_pairs_exceed_lambda(l, Pd, Pi, N, lambda_array)
         parity[i] = 1.0 - binom.cdf(thr, n_check, pe)
-    
+
     total = event1 + event2 + parity
     return total, event1, event2, parity
 
@@ -498,13 +560,13 @@ if __name__ == "__main__":
     N = K + c1
 
     k_rep = c2 * l
-    #l = l // 2  #remove for binary, keep for DNA
+    # l = l // 2  #remove for binary, keep for DNA
 
-    lim = 5 #|Δ|<=lim will be decoded, otherwise failure, important for capping complexity in practice
-    lambda_depths = [0]*lim #initialize all depths to zero
-    lambda_depths[0] = 1  #depth=1 when Δ = 0
-    lambda_depths[1] = 1  #depth=1 when |Δ| = 1
-    lambda_depths[2] = 0 #depth=1 when |Δ| = 2
+    lim = 5  # |Δ|<=lim will be decoded, otherwise failure, important for capping complexity in practice
+    lambda_depths = [0] * lim  # initialize all depths to zero
+    lambda_depths[0] = 1  # depth=1 when Δ = 0
+    lambda_depths[1] = 1  # depth=1 when |Δ| = 1
+    lambda_depths[2] = 0  # depth=1 when |Δ| = 2
 
     # Grid of Pe
     Pe = np.arange(0.001, 0.015 + 1e-12, 0.001)
@@ -541,7 +603,7 @@ if __name__ == "__main__":
     n_check = 20
     totalB, event1_B, event2_B, parityB = theoretical_error_brute(
         Pe,
-        l=l,          
+        l=l,
         c1=c1,
         c2=c2,
         N=N,
